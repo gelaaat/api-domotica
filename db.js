@@ -1,8 +1,10 @@
 import pg from "pg";
 import dotenv from 'dotenv'
 
+//Primer de tot carreguem l'arxiu de credencials
 dotenv.config()
 
+//Guardem la configuració de la connexió en un objecte per poder accedir posteriorment
 const connectionData = {
   user: process.env.PG_USER,
   host: process.env.PG_HOST,
@@ -11,7 +13,8 @@ const connectionData = {
   password: process.env.PG_PASSWORD
 }
 
-
+//Definim el tipus d'interval i variables per poder treballar amb les funcions
+//i les consultes sql de despés
 const tipusInterval = {
   '5_min': {
     dateTrunc: 'minute',
@@ -55,17 +58,21 @@ const tipusZona = {
   'interior': 'sensors_data'
 }
 
-
+//Aquesta funció retorna les dades necessàries pel gràfic d'un dia en intervals de 1h
 export const getDataHoraria = async (variable, zona, dia) => {
   try {
-    console.log('intento entrar')
     const data = new Date(dia)
     data.setUTCHours(0)
     const diaParsed = data.toISOString()
     const zonaSensor = tipusZona[zona]
+
+    //Creeem una instància de client de postgresql
     const client = new pg.Client(connectionData)
+
+    //Ens connectem i esperem a que la connexió s'estableixi
     await client.connect()
 
+    //Executem la consulta i esperem la seva resposta
     const query = await client.query(
       `
       SELECT
@@ -81,18 +88,19 @@ export const getDataHoraria = async (variable, zona, dia) => {
       [diaParsed]
     )
     
+    //Esperem a que es tanqui la connexió per no deixar connexions obertes i saturar la bbdd
     await client.end()
     return query.rows
     
     
   } catch (error) {
-    console.log('entro al error')
+
     console.log(error)
     return error
   }
 }
 
-
+//Aquesta funció retorna els últims valors registrats de les estacions ambientals
 export const getLiveData = async (variable, zona) => {
   try {
     const zonaSensor = tipusZona[zona]
@@ -112,18 +120,25 @@ export const getLiveData = async (variable, zona) => {
   }
 }
 
+//Aquesta funció retorna els registres en l'interval i rang de dates desitjat per l'usuari
 export const getData = async (variable, zona, diaInici, diaFinal, interval) => {
   try {
+    //Recollim els valors de configuració per no hardcorear la query sql
     const zonaSensor = tipusZona[zona]
     const intervalBo = tipusInterval[interval]
 
+    //Verifiquem que l'interval sigui correcte o acceptable
     if (!intervalBo) {
       return new Error('Valors introduits erronis')
     }
     
+    //Creem una instància d'un client de postgresql
     const client = new pg.Client(connectionData)
+
+    //Ens connectem a la bbdd i esperem a que la connexió s'estableixi
     await client.connect()
 
+    //Executem la consulta i esperem la seva resposta
     const query = await client.query(
       `
       SELECT
@@ -135,7 +150,7 @@ export const getData = async (variable, zona, diaInici, diaFinal, interval) => {
           date_trunc('${intervalBo.dateTrunc}', captura_data) - 
           (date_part('${intervalBo.dateTrunc}', captura_data)::integer % ${intervalBo.residu}) * interval '${intervalBo.interval}' AS timeseries,
           ${variable}
-        FROM ${zonaSensor}
+        FROM sensors_data
         WHERE captura_data >= $1::timestamp AT TIME ZONE 'Europe/Madrid'
             AND captura_data < $2::timestamp AT TIME ZONE 'Europe/Madrid'
       ) subquery
@@ -145,6 +160,8 @@ export const getData = async (variable, zona, diaInici, diaFinal, interval) => {
       `,
       [diaInici, diaFinal]
     )
+
+    //Esperem a que la connexió tanqui per no deixar connexions obertes i saturar la BBDD
     await client.end()
     return query.rows
     
